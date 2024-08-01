@@ -38,8 +38,8 @@ struct TesterInfo {
 
 impl TesterInfo {
     fn print_summary(&self) {
-        let fail_times = self.fail_times.load(Ordering::SeqCst);
-        let run_times = self.run_times.load(Ordering::SeqCst);
+        let fail_times = self.fail_times.load(Ordering::Relaxed);
+        let run_times = self.run_times.load(Ordering::Relaxed);
         let total_score = *self.total_scores.lock().unwrap();
         if fail_times > 0 {
             println!("#tester finished. Failed {} / {}", fail_times, run_times);
@@ -85,8 +85,8 @@ impl TesterInfo {
     }
 
     fn append_result(&self, run_times: u32, fail_times: u32, total_scores: f64) {
-        self.run_times.fetch_add(run_times, Ordering::SeqCst);
-        self.fail_times.fetch_add(fail_times, Ordering::SeqCst);
+        self.run_times.fetch_add(run_times, Ordering::Relaxed);
+        self.fail_times.fetch_add(fail_times, Ordering::Relaxed);
         if self.cli_args.score {
             *self.total_scores.lock().unwrap() += total_scores;
         }
