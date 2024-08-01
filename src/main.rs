@@ -1,4 +1,5 @@
 use clap::Parser;
+use indicatif::{ProgressBar, ProgressStyle, ProgressState};
 use std::{
     io::Write,
     process::{Command, Stdio},
@@ -6,7 +7,8 @@ use std::{
         atomic::{AtomicU32, Ordering},
         Arc, Mutex,
     },
-    thread,
+    thread::{self, sleep},
+    time::Duration,
 };
 
 /// tester: A simple cli tool to help you run a test multi times
@@ -19,11 +21,14 @@ struct Cli {
     /// Calculate the average score of every run
     #[arg(short, long, default_value_t = false)]
     score: bool,
+    /// Show progress bar
+    #[arg(long, default_value_t = false)]
+    progress: bool,
     /// Number of times to run the commands
     #[arg(short = 'n')]
     times: u32,
     /// Number of threads
-    #[arg(short = 'p')]
+    #[arg(short = 'p', default_value_t = 1)]
     threads: u8,
     exec: String,
     exec_args: Vec<String>,
@@ -79,17 +84,31 @@ impl TesterInfo {
                 let score: f64 = std_out.trim().parse().unwrap();
                 total_scores += score;
             }
+
             run_times += 1;
+            if self.cli_args.progress {
+                self.append_run_times(1);
+            }
         }
-        self.append_result(run_times, fail_times, total_scores);
+        self.append_result(fail_times, total_scores);
+        if !self.cli_args.progress {
+            self.append_run_times(run_times);
+        }
     }
 
-    fn append_result(&self, run_times: u32, fail_times: u32, total_scores: f64) {
-        self.run_times.fetch_add(run_times, Ordering::Relaxed);
+    fn append_result(&self, fail_times: u32, total_scores: f64) {
         self.fail_times.fetch_add(fail_times, Ordering::Relaxed);
         if self.cli_args.score {
             *self.total_scores.lock().unwrap() += total_scores;
         }
+    }
+
+    fn append_run_times(&self, run_times: u32) {
+        self.run_times.fetch_add(run_times, Ordering::Relaxed);
+    }
+
+    fn get_progress(&self) -> u32 {
+        return self.run_times.load(Ordering::Relaxed);
     }
 }
 
@@ -121,6 +140,26 @@ fn main() {
             test_info_share.do_test(times_per_thread);
         });
         handles.push(handle);
+    }
+
+    if test_info.cli_args.progress {
+        let total_progress = test_info.cli_args.times;
+        let mut current_progress = test_info.get_progress();
+        let progress_bar = ProgressBar::new(total_progress as u64);
+        let progress_bar_template = "{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})";
+        let eta_progress_fn = |state: &ProgressState, w: &mut dyn std::fmt::Write| write!(w, "{:.1}s", state.eta().as_secs_f64()).unwrap();
+        let progress_bar_style = ProgressStyle::with_template(progress_bar_template)
+                                                .unwrap()
+                                                .with_key("eta", eta_progress_fn)
+                                                .progress_chars("#>-");
+        progress_bar.set_style(progress_bar_style);
+        let update_duration = Duration::from_secs_f32(0.1);
+        while current_progress < total_progress {
+            current_progress = test_info.get_progress();
+            progress_bar.set_position(current_progress as u64);
+            sleep(update_duration);
+        }
+        progress_bar.finish();
     }
 
     for handle in handles {
