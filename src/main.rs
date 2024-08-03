@@ -1,5 +1,5 @@
 use clap::Parser;
-use indicatif::{ProgressBar, ProgressStyle, ProgressState};
+use indicatif::{ProgressBar, ProgressState, ProgressStyle};
 use std::{
     io::Write,
     process::{Command, Stdio},
@@ -146,12 +146,15 @@ fn main() {
         let total_progress = test_info.cli_args.times;
         let mut current_progress = test_info.get_progress();
         let progress_bar = ProgressBar::new(total_progress as u64);
-        let progress_bar_template = "{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})";
-        let eta_progress_fn = |state: &ProgressState, w: &mut dyn std::fmt::Write| write!(w, "{:.1}s", state.eta().as_secs_f64()).unwrap();
+        let progress_bar_template =
+            "{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta})";
+        let eta_progress_fn = |state: &ProgressState, w: &mut dyn std::fmt::Write| {
+            write!(w, "{:.1}s", state.eta().as_secs_f64()).unwrap()
+        };
         let progress_bar_style = ProgressStyle::with_template(progress_bar_template)
-                                                .unwrap()
-                                                .with_key("eta", eta_progress_fn)
-                                                .progress_chars("#>-");
+            .unwrap()
+            .with_key("eta", eta_progress_fn)
+            .progress_chars("#>-");
         progress_bar.set_style(progress_bar_style);
         let update_duration = Duration::from_secs_f32(0.1);
         while current_progress < total_progress {
