@@ -7,4 +7,5 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.0", features = ["derive"] }
+ctrlc = "3.4.4"
 indicatif = "0.17.8"

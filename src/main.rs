@@ -1,10 +1,11 @@
 use clap::Parser;
+use ctrlc;
 use indicatif::{ProgressBar, ProgressState, ProgressStyle};
 use std::{
     io::Write,
     process::{Command, Stdio},
     sync::{
-        atomic::{AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
         Arc, Mutex,
     },
     thread::{self, sleep},
@@ -39,6 +40,7 @@ struct TesterInfo {
     run_times: AtomicU32,
     total_scores: Mutex<f64>,
     cli_args: Cli,
+    ctrlc_signal: AtomicBool,
 }
 
 impl TesterInfo {
@@ -48,6 +50,10 @@ impl TesterInfo {
         let total_score = *self.total_scores.lock().unwrap();
         if fail_times > 0 {
             println!("#tester finished. Failed {} / {}", fail_times, run_times);
+            if self.cli_args.score {
+                let avg_score = total_score / ((run_times - fail_times) as f64);
+                println!("#tester average score(Ignore failed runs): {}.", avg_score);
+            }
         } else {
             println!("#tester finished. No failure in {} runs.", run_times);
             if self.cli_args.score {
@@ -67,11 +73,12 @@ impl TesterInfo {
             .stderr(Stdio::piped())
             .stdout(Stdio::piped());
         for _ in 0..times {
+            if self.ctrlc_signaled() {
+                break;
+            }
             let p_instance = program.spawn().expect("cmd failed to start");
             let p_ret = p_instance.wait_with_output().expect("Unable to run cmd");
-            if !p_ret.status.success() {
-                fail_times += 1;
-            }
+
             if !self.cli_args.silent {
                 let mut stdout = std::io::stdout();
                 let mut stderr = std::io::stderr();
@@ -79,7 +86,9 @@ impl TesterInfo {
                 stderr.write_all(&p_ret.stderr).unwrap();
             }
 
-            if self.cli_args.score {
+            if !p_ret.status.success() {
+                fail_times += 1;
+            } else if self.cli_args.score {
                 let std_out = String::from_utf8(p_ret.stdout).unwrap();
                 let score: f64 = std_out.trim().parse().unwrap();
                 total_scores += score;
@@ -110,6 +119,10 @@ impl TesterInfo {
     fn get_progress(&self) -> u32 {
         return self.run_times.load(Ordering::Relaxed);
     }
+
+    fn ctrlc_signaled(&self) -> bool {
+        return self.ctrlc_signal.load(Ordering::Relaxed);
+    }
 }
 
 fn main() {
@@ -117,6 +130,7 @@ fn main() {
         fail_times: AtomicU32::new(0),
         run_times: AtomicU32::new(0),
         total_scores: Mutex::new(0.0),
+        ctrlc_signal: AtomicBool::new(false),
         cli_args: Cli::parse(),
     });
 
@@ -142,6 +156,14 @@ fn main() {
         handles.push(handle);
     }
 
+    // handles ctrlc
+    let test_info_share = test_info.clone();
+    ctrlc::set_handler(move || {
+        println!("Ctrl-c pressed. Terminating...");
+        test_info_share.ctrlc_signal.store(true, Ordering::Relaxed);
+    })
+    .unwrap();
+
     if test_info.cli_args.progress {
         let total_progress = test_info.cli_args.times;
         let mut current_progress = test_info.get_progress();
@@ -158,6 +180,9 @@ fn main() {
         progress_bar.set_style(progress_bar_style);
         let update_duration = Duration::from_secs_f32(0.1);
         while current_progress < total_progress {
+            if test_info.ctrlc_signaled() {
+                break;
+            }
             current_progress = test_info.get_progress();
             progress_bar.set_position(current_progress as u64);
             sleep(update_duration);

@@ -16,5 +16,5 @@ TODO
 
 - [x] Multi-thread support
 - [x] Progress bar support
-- [ ] Handles `ctrl-c`
+- [x] Handles `ctrl-c`
 - [ ] Fix README
